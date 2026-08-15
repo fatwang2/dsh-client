@@ -1,0 +1,35 @@
+appId: dev.dshmac.app
+productName: DeepSeek Harness
+artifactName: DeepSeek-Harness-${version}-${os}-${arch}.${ext}
+copyright: MIT
+asar: true
+publish:
+  provider: github
+  owner: fatwang2
+  repo: dsh-client
+directories:
+  output: dist
+files:
+  - lib/**
+  - package.json
+extraResources:
+  - from: resources
+    to: desktop-resources
+  - from: runtime-host/node_modules
+    to: host/node_modules
+afterPack: scripts/verify-packaged-runtime.cjs
+mac:
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  icon: build/icon.png
+  notarize: false
+  target:
+    - dir
+win:
+  icon: build/icon.png
+  target:
+    - dir
+linux:
+  category: Development
+  target:
+    - dir

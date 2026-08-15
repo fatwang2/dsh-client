@@ -1,0 +1,12 @@
+node_modules/
+runtime-host/
+dist/
+lib/
+build/*
+!build/icon.png
+*.log
+.DS_Store
+.env
+.env.*
+*.p8
+*.p12
