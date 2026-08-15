@@ -4,6 +4,8 @@ DSH Client is a native client for the [DeepSeek Harness](https://github.com/deep
 
 This is an independent community project and is not affiliated with or endorsed by DeepSeek.
 
+![DeepSeek Harness for macOS](docs/deepseek-harness-macos.png)
+
 ## Architecture
 
 ```
