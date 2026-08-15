@@ -303,10 +303,14 @@ function initializeUpdates(): void {
       })
     },
     showError: async (message) => {
+      const noPublishedRelease = message.includes('No published versions on GitHub')
       await dialog.showMessageBox({
-        type: 'error',
-        title: '无法检查更新',
-        message,
+        type: noPublishedRelease ? 'info' : 'error',
+        title: noPublishedRelease ? '暂无正式版本' : '无法检查更新',
+        message: noPublishedRelease ? '当前还没有可用的正式发布版本。' : message,
+        ...(noPublishedRelease ? {
+          detail: '发布首个 GitHub Release 后，此处会自动比较并下载新版本。',
+        } : {}),
       })
     },
     promptToRestart: async (version) => {
