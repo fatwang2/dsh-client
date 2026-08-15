@@ -23,6 +23,12 @@ mac:
   hardenedRuntime: true
   icon: build/icon.png
   notarize: false
+  # osx-sign treats binary-looking resources as code. These formats are data
+  # sealed by their containing bundle, so signing them individually only adds
+  # hundreds of timestamped codesign calls.
+  signIgnore:
+    - '\.pak$'
+    - '\.(?:woff2?|ttf|otf)$'
   target:
     - dir
 win:

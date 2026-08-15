@@ -52,6 +52,15 @@ function capture(command, args, cwd, env) {
   return result.stdout.trim()
 }
 
+function timed(label, action) {
+  const startedAt = Date.now()
+  try {
+    return action()
+  } finally {
+    console.log(`[timing] ${label}: ${((Date.now() - startedAt) / 1000).toFixed(1)}s`)
+  }
+}
+
 function sanitizedEnvironment(env) {
   const sanitized = { ...env }
   for (const name of RELEASE_VARIABLES) delete sanitized[name]
@@ -178,30 +187,35 @@ function publishRelease(artifacts, env) {
 }
 
 function main() {
-  const releaseEnvironment = { ...process.env }
-  const ready = assertMacReleaseReady(releaseEnvironment)
-  const shouldUpload = releaseEnvironment.SKIP_UPLOAD !== '1'
-  if (shouldUpload) assertPublishReady(releaseEnvironment)
-  console.log(`macOS release preflight passed: signing via ${ready.signing}; notarization via ${ready.notarization}; updates via ${releaseRepo}`)
-  const buildEnvironment = sanitizedEnvironment(releaseEnvironment)
-  run('npm', ['run', 'build'], desktopRoot, buildEnvironment)
-  run('node', ['scripts/stage-runtime.mjs'], desktopRoot, buildEnvironment)
-  const builderIdentity = releaseEnvironment.MACOS_SIGN_IDENTITY?.replace(/^Developer ID Application:\s*/u, '')
-  const builderArguments = [
-    'electron-builder', '--mac', 'dmg', 'zip', '--publish', 'never',
-    '--config.forceCodeSigning=true',
-    '--config.mac.notarize=true',
-    ...(builderIdentity === undefined
-      ? []
-      : [`--config.mac.identity=${builderIdentity}`]),
-  ]
-  run('npx', builderArguments, desktopRoot, releaseEnvironment)
-  const release = assertUpdateArtifacts()
-  assertDistributionReady(release.appPath, release.artifacts, releaseEnvironment)
-  if (shouldUpload) {
-    publishRelease(release.artifacts, releaseEnvironment)
-  } else {
-    console.log('SKIP_UPLOAD=1: signed and notarized artifacts verified locally; GitHub was not changed')
+  const releaseStartedAt = Date.now()
+  try {
+    const releaseEnvironment = { ...process.env }
+    const ready = timed('release preflight', () => assertMacReleaseReady(releaseEnvironment))
+    const shouldUpload = releaseEnvironment.SKIP_UPLOAD !== '1'
+    if (shouldUpload) timed('publish preflight', () => assertPublishReady(releaseEnvironment))
+    console.log(`macOS release preflight passed: signing via ${ready.signing}; notarization via ${ready.notarization}; updates via ${releaseRepo}`)
+    const buildEnvironment = sanitizedEnvironment(releaseEnvironment)
+    timed('application build', () => run('npm', ['run', 'build'], desktopRoot, buildEnvironment))
+    timed('host runtime staging', () => run('node', ['scripts/stage-runtime.mjs'], desktopRoot, buildEnvironment))
+    const builderIdentity = releaseEnvironment.MACOS_SIGN_IDENTITY?.replace(/^Developer ID Application:\s*/u, '')
+    const builderArguments = [
+      'electron-builder', '--mac', 'dmg', 'zip', '--publish', 'never',
+      '--config.forceCodeSigning=true',
+      '--config.mac.notarize=true',
+      ...(builderIdentity === undefined
+        ? []
+        : [`--config.mac.identity=${builderIdentity}`]),
+    ]
+    timed('packaging, signing, and notarization', () => run('npx', builderArguments, desktopRoot, releaseEnvironment))
+    const release = timed('update artifact inspection', () => assertUpdateArtifacts())
+    timed('distribution verification', () => assertDistributionReady(release.appPath, release.artifacts, releaseEnvironment))
+    if (shouldUpload) {
+      timed('GitHub Release upload', () => publishRelease(release.artifacts, releaseEnvironment))
+    } else {
+      console.log('SKIP_UPLOAD=1: signed and notarized artifacts verified locally; GitHub was not changed')
+    }
+  } finally {
+    console.log(`[timing] total release flow: ${((Date.now() - releaseStartedAt) / 1000).toFixed(1)}s`)
   }
 }
 
