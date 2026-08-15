@@ -12,7 +12,8 @@ src/host-supervisor.ts    dsh web child process: spawn, readiness URL parsing, g
 src/window-lifecycle.ts   close-to-hide and quit sequencing, independent from Electron
 scripts/stage-runtime.mjs materializes the pinned dsh dependency closure into runtime-host/
 scripts/verify-packaged-runtime.cjs  afterPack guard: reject packages missing Host artifacts
-scripts/release-mac.mjs   preflighted signed + notarized DMG build
+scripts/release-mac.sh    local signed, notarized, GitHub Release entrypoint
+scripts/release-mac.mjs   release preflight, packaging verification, and upload
 runtime/package.json      exact @deepseek-ai/dsh version pin (no compatibility promise upstream)
 ```
 
@@ -72,11 +73,19 @@ Signed releases use `electron-updater` with the public
 feed. `electron-builder` embeds that repository into the application and
 generates the ZIP, blockmap, and `latest-mac.yml` consumed by Squirrel.Mac.
 
-Push a version tag such as `v0.1.0` to run the release workflow. It requires
-the `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`,
-`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` repository secrets. The
-workflow signs and notarizes the app before publishing the DMG, update ZIP,
-blockmap, and update manifest to the matching GitHub Release.
+Releases are built on the maintainer's Mac, following the same local model as
+Pulse. Copy `.env.release.example` to the ignored `.env.release`, configure the
+Developer ID identity and App Store Connect API key, then run:
+
+```sh
+SKIP_UPLOAD=1 npm run dist:signed  # sign, notarize, and verify without publishing
+npm run dist:signed                # publish v<package version> to GitHub Releases
+```
+
+The release command refuses to publish from a dirty worktree or a branch other
+than `main`. It signs and notarizes first, verifies the app and update metadata,
+then uses the locally authenticated GitHub CLI to create or update the Release.
+Version-specific notes live in `.github/release-notes/<version>.md`.
 
 A signed app checks quietly after startup, downloads in the background, and
 offers to restart only after the update is ready. Choosing to restart first
@@ -89,6 +98,9 @@ shuts down the bundled Host through the normal graceful path.
 | `DSH_MAC_OWN_HOME=1` | Confine harness state to the app's data dir (`~/Library/Application Support/dsh-mac/dsh-home`) instead of the shared `~/.dsh`. |
 | `DSH_MAC_NODE_EXECUTABLE` | Dev-only: Node-compatible binary used to run the staged CLI. |
 | `DSH_MAC=1` | Marker exported to the Host process environment. |
+| `DSH_RELEASE_ENV` | Optional path to the local release environment file; defaults to `.env.release`. |
+| `DSH_RELEASE_TAG` | Optional Release tag override; defaults to `v<package version>`. |
+| `SKIP_UPLOAD=1` | Build, sign, notarize, and verify locally without changing GitHub Releases. |
 
 All other environment variables pass through to the Host (`DEEPSEEK_API_KEY`, proxies, etc.).
 

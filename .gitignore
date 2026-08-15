@@ -8,5 +8,6 @@ build/*
 .DS_Store
 .env
 .env.*
+!.env.release.example
 *.p8
 *.p12

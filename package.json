@@ -23,7 +23,7 @@
     "dev": "npm run build && electron .",
     "package": "npm run build && npm run stage && electron-builder --dir --config.mac.identity=null",
     "dist": "npm run build && npm run stage && electron-builder --mac dmg zip --config.mac.identity=null",
-    "dist:signed": "node scripts/release-mac.mjs"
+    "dist:signed": "bash scripts/release-mac.sh"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
