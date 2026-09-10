@@ -106,7 +106,7 @@ async function inspectPackage(packageDirectory, found) {
 }
 
 /**
- * Reject a mixed-release tree. The harness ships ~186 packages that are
+ * Reject a mixed-release tree. The harness ships ~230 packages that are
  * cut together and carry no cross-version compatibility promise, so a CLI
  * from one release candidate sitting on internals from another is a bug
  * even when it boots.

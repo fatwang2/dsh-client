@@ -225,10 +225,6 @@ async function createMainWindow(): Promise<BrowserWindow> {
     if (isExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  // Keep the Host's access token on the first navigation; the API fence
-  // binds the session to it and rejects an untokened loopback request.
-  const rendererUrl = new URL(url)
-  rendererUrl.searchParams.set('dsh-mac-platform', process.platform)
   if (process.platform === 'darwin') {
     // Queue the inset for the first document without awaiting: awaiting
     // insertCSS before the renderer has committed a document can leave the
@@ -243,7 +239,9 @@ async function createMainWindow(): Promise<BrowserWindow> {
     injectInset()
     window.webContents.on('dom-ready', injectInset)
   }
-  await window.loadURL(rendererUrl.href)
+  // Load the readiness URL verbatim: it carries the Host's access token, and
+  // the API fence binds the session to it and rejects an untokened request.
+  await window.loadURL(url)
   if (!lifecycle?.isQuitting) window.show()
   return window
 }

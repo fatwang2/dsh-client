@@ -12,6 +12,7 @@ This is an independent community project and is not affiliated with or endorsed 
 src/main.ts               Electron shell: window, app menu, security hardening, boot wiring
 src/host-supervisor.ts    dsh web child process: spawn, readiness URL parsing, graceful shutdown
 src/window-lifecycle.ts   close-to-hide and quit sequencing, independent from Electron
+src/update-controller.ts  electron-updater states: quiet check, background download, restart prompt
 scripts/stage-runtime.mjs materializes the pinned dsh dependency closure into runtime-host/
 scripts/verify-packaged-runtime.cjs  afterPack guard: reject packages missing Host artifacts
 scripts/release-mac.sh    local signed + notarized build entrypoint (never publishes)
@@ -19,6 +20,9 @@ scripts/release-mac.mjs   release preflight, packaging verification; uploads onl
 scripts/release-assets.mjs  the asset set that makes a Release "complete", shared by both scripts
 scripts/smoke-host.mjs    release gate: boots the staged Host and validates its readiness line
 scripts/track-dsh.mjs     compares the pin with upstream's newest dsh Release; bumps pin, app version, release notes
+scripts/semver-compare.mjs  SemVer precedence for the tracker, which runs before any npm ci
+scripts/verify-inset.mjs  CDP check of the traffic-light inset geometry on a running app
+scripts/make-icons.swift  regenerates build/icon.png from the harness mark
 .github/workflows/track-dsh.yml  scheduled: new upstream dsh → release
 .github/workflows/release.yml    manual: release the version currently on main
 .github/workflows/release-macos.yml  the shared build, sign, notarize, verify, publish job
@@ -172,6 +176,24 @@ gh secret set APPLE_API_KEY_ID --body XXXXXXXXXX
 gh secret set APPLE_API_ISSUER --body 00000000-0000-0000-0000-000000000000
 ```
 
+`CSC_LINK` and `CSC_KEY_PASSWORD` are one pair, not two settings: re-exporting
+the `.p12` gives it a new password, so both have to be set from the same export.
+Updating one alone fails in the signing step with `security:
+SecKeychainItemImport: MAC verification failed during PKCS12 import (wrong
+password?)` — the identical error a genuinely wrong password produces. Secrets
+cannot be read back, so what tells the two apart is the sha256 electron-builder
+logs in place of the `-P` argument: an unchanged hash across two runs means the
+password is not what moved, and the certificate is the stale half. Verify a
+`.p12` and its password together before uploading either, without touching the
+login keychain:
+
+```sh
+security create-keychain -p verify /tmp/verify.keychain
+security import DeveloperID.p12 -k /tmp/verify.keychain -P "$PASSWORD" &&
+  security find-identity -p codesigning /tmp/verify.keychain
+security delete-keychain /tmp/verify.keychain
+```
+
 ### Releasing a client-side change
 
 1. Merge the change on `main` and bump `version` in `package.json` (add
@@ -245,7 +267,7 @@ All other environment variables pass through to the Host (`DEEPSEEK_API_KEY`, pr
 ## Updating the harness
 
 The harness is a fast-moving release candidate with explicitly no compatibility
-promise, and pinning `@deepseek-ai/dsh` alone does not pin the Host. Its ~186
+promise, and pinning `@deepseek-ai/dsh` alone does not pin the Host. Its ~230
 sibling packages depend on each other through caret ranges, and `^0.1.0-rc.6`
 matches `0.1.0-rc.7`, so a lockfile-less install silently produces a CLI from
 one release candidate sitting on internals and a Web frontend from another.
@@ -268,11 +290,6 @@ Without `--relock`, `npm ci` refuses a pin the lockfile does not satisfy, so a
 bump can never reach a package by accident. After upgrading, re-verify startup
 and re-run `scripts/verify-inset.mjs`: the harness frontend carries no
 compatibility promise for the DOM the traffic-light inset stylesheet targets.
-
-## Roadmap
-
-- DSH_HOME policy switch in the application menu
-- Renderer IPC carrier (the transport shape the harness GUI architecture reserves for desktop hosts)
 
 ## License
 
