@@ -1,0 +1,194 @@
+# The one place a macOS release is built, verified, and published.
+#
+# Called by `.github/workflows/track-dsh.yml` (scheduled: a new upstream dsh
+# release) and by `.github/workflows/release.yml` (manual: ship what is on
+# main). Both entry points run this exact sequence, so there is no second build
+# path that could drift from the signed, notarized, verified one. Serialization
+# lives in the callers: both declare the workflow-level `concurrency` group
+# `dsh-release`. It is deliberately *not* declared here — a called workflow
+# sharing its caller's group queues behind its own caller.
+#
+# Publishing is cloud-only: DSH_RELEASE_UPLOAD is set from the `publish` input
+# here, and scripts/release-mac.mjs refuses to upload from a machine that is not
+# GitHub Actions — a developer laptop can build and verify the identical
+# artifacts but never race this job for a version tag.
+#
+# Required repository secrets: CSC_LINK (base64 .p12), CSC_KEY_PASSWORD,
+# APPLE_API_KEY_P8 (.p8 contents), APPLE_API_KEY_ID, APPLE_API_ISSUER.
+
+name: Release macOS
+
+on:
+  workflow_call:
+    inputs:
+      harness_version:
+        description: "Exact @deepseek-ai/dsh version to pin first (this also patch-bumps the app version). Empty: build the version already on main."
+        required: false
+        type: string
+        default: ''
+      publish:
+        description: "Upload to GitHub Releases. false builds, signs, notarizes, and verifies only."
+        required: false
+        type: boolean
+        default: true
+      require_new_release:
+        description: "Refuse when the current app version already has a complete Release."
+        required: false
+        type: boolean
+        default: false
+      skip_if_released:
+        description: "Skip the build when the app version (after any bump) already has a complete Release."
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      APPLE_API_KEY_P8:
+        required: false
+      APPLE_API_KEY_ID:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
+
+permissions:
+  contents: write
+  # For actions/upload-artifact (keeps failed-build diagnostics on the run).
+  actions: write
+
+jobs:
+  release:
+    name: Build, sign, notarize, and publish
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # release-mac.mjs only uploads when this is set *and* it runs on GitHub
+      # Actions; a dry run (`publish: false`) leaves it empty.
+      DSH_RELEASE_UPLOAD: ${{ inputs.publish && '1' || '' }}
+      DSH_REQUIRE_NEW_RELEASE: ${{ inputs.require_new_release && '1' || '' }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Bump the harness pin and the app version
+        if: ${{ inputs.harness_version != '' }}
+        env:
+          DSH_TRACK_VERSION: ${{ inputs.harness_version }}
+        run: |
+          set -euo pipefail
+          BEFORE="$(node -p "require('./runtime/package.json').dependencies['@deepseek-ai/dsh']")"
+          node scripts/track-dsh.mjs bump
+          AFTER="$(node -p "require('./runtime/package.json').dependencies['@deepseek-ai/dsh']")"
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "pin already at $AFTER; nothing to validate"
+            exit 0
+          fi
+          # The pin moved, and bump staged the new closure with --relock. Prove
+          # the shell can parse this harness before the bump is allowed to land
+          # on main: a readiness-line change fails here, in the working tree,
+          # instead of committing a pin the shipped client could not boot with.
+          node scripts/smoke-host.mjs
+
+      # Runs *after* the optional bump so it asks the right question: does the
+      # version this run would publish already exist in full? A queued duplicate
+      # run, or a manual release that finished first, skips the expensive build
+      # here instead of rebuilding and clobbering an identical Release.
+      - name: Check whether this version is already released
+        id: gate
+        if: ${{ inputs.skip_if_released }}
+        run: node scripts/track-dsh.mjs status
+
+      - name: Nothing to release
+        if: ${{ steps.gate.outputs.released == 'true' }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "DeepSeek Harness ${VERSION} already has a complete Release; nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install dependencies
+        if: ${{ steps.gate.outputs.released != 'true' }}
+        run: npm ci
+
+      - name: Test
+        if: ${{ steps.gate.outputs.released != 'true' }}
+        run: npm test
+
+      - name: Typecheck
+        if: ${{ steps.gate.outputs.released != 'true' }}
+        run: npm run typecheck
+
+      # Only what the bump produced is committed (pin, host lockfile, app
+      # version, release notes) — never `git add -A`. Committing after the
+      # tests keeps an untested bump off main; pushing before the build lets the
+      # release tag target this exact commit, and a build that fails afterwards
+      # is retried by the next run without a second bump.
+      #
+      # `publish` gates the push: a dry run may build a bumped tree, but it must
+      # never advance main — otherwise the tracker would notice the unreleased
+      # version on its next tick and publish what was meant to be a rehearsal.
+      # The host lockfile is added only when present: staging creates it on a
+      # fresh resolve, and a checkout that predates it must not fail the run.
+      - name: Commit and push the bump
+        if: ${{ inputs.publish && steps.gate.outputs.released != 'true' }}
+        run: |
+          set -euo pipefail
+          PATHS=(runtime/package.json package.json package-lock.json .github/release-notes/)
+          if [ -f runtime-host/package-lock.json ]; then
+            PATHS+=(runtime-host/package-lock.json)
+          fi
+          git add -- "${PATHS[@]}"
+          if git diff --cached --quiet; then
+            echo "nothing to commit (the pin already points at the requested version)"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git status --short
+          HARNESS_VERSION="$(node -p "require('./runtime/package.json').dependencies['@deepseek-ai/dsh']")"
+          git commit -m "Bundle @deepseek-ai/dsh ${HARNESS_VERSION}"
+          git push origin HEAD:main
+
+      - name: Install the App Store Connect API key
+        if: ${{ steps.gate.outputs.released != 'true' }}
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -z "$APPLE_API_KEY_P8" ]; then
+            echo "::error::APPLE_API_KEY_P8 secret is not set" >&2
+            exit 1
+          fi
+          KEY="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$KEY"
+          chmod 600 "$KEY"
+          echo "APPLE_API_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, verify, and publish
+        if: ${{ steps.gate.outputs.released != 'true' }}
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/release-mac.mjs
+
+      - name: Keep the artifacts with the run
+        if: ${{ !cancelled() && steps.gate.outputs.released != 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-artifacts
+          if-no-files-found: ignore
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest-mac.yml

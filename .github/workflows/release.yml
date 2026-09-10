@@ -1,0 +1,61 @@
+# Manual release: publish the version currently on main.
+#
+# Use this after merging client-side changes and bumping `version` in
+# package.json (plus `.github/release-notes/<version>.md` when the notes matter).
+# The scheduled tracker in track-dsh.yml publishes upstream dsh updates on its
+# own; this workflow is the release button for everything else, and it is the
+# only way a version reaches GitHub Releases from a branch you control.
+#
+# It calls the same release workflow the tracker calls, so the artifact is
+# identical: built, signed, notarized, and verified on a clean checkout with
+# the repository secrets, never from a developer machine.
+
+name: Release current main
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness_version:
+        description: "Also pin this exact @deepseek-ai/dsh version first (this patch-bumps the app version). Leave empty to release the version already on main."
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: "Build, sign, notarize, and verify without publishing"
+        required: false
+        type: boolean
+        default: false
+      allow_republish:
+        description: "Allow replacing a version that is already fully released"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  # Forwarded to the release workflow for actions/upload-artifact.
+  actions: write
+
+# Shared with track-dsh.yml: one release at a time across both entry points, so
+# a manual run and a scheduled tick can never upload the same version at once.
+concurrency:
+  group: dsh-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    # `workflow_dispatch` cannot be restricted to a branch (`branches:` is not a
+    # workflow_dispatch key); the release always builds main, so refuse others.
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/release-macos.yml
+    with:
+      harness_version: ${{ inputs.harness_version }}
+      publish: ${{ !inputs.dry_run }}
+      # A manual release must introduce a new version; replacing a completed one
+      # is deliberate, so it takes the explicit allow_republish switch.
+      require_new_release: ${{ !inputs.allow_republish }}
+      # Refusing beats silently skipping here: nothing released means the
+      # version on main still needs a bump, which the operator should see.
+      skip_if_released: false
+    secrets: inherit

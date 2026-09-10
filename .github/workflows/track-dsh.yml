@@ -1,0 +1,84 @@
+# Keep the bundled harness on the latest published @deepseek-ai/dsh.
+#
+# `check` (Linux, seconds) compares the pin in runtime/package.json with the
+# newest dsh-v* Release in deepseek-ai/deepseek-harness (alphas included) and
+# looks for a complete GitHub Release of the current app version (published,
+# non-draft, with DMG + update ZIP + .zip.blockmap + latest-mac.yml). When
+# there is something to ship it hands off to the shared release workflow,
+# release-macos.yml, which bumps, commits, tests, then builds, signs,
+# notarizes, verifies, and publishes — the same code path a manual release uses.
+#
+# The release job is a repair path as well: if a build failed after its bump
+# commit landed, the next run sees the version still unreleased and retries it
+# without bumping again. For manual client-side releases use release.yml.
+#
+# Required repository secrets: CSC_LINK (base64 .p12), CSC_KEY_PASSWORD,
+# APPLE_API_KEY_P8 (.p8 contents), APPLE_API_KEY_ID, APPLE_API_ISSUER.
+
+name: Track dsh releases
+
+on:
+  schedule:
+    - cron: '23 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact @deepseek-ai/dsh version to bundle (default: the newest upstream GitHub Release)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  # Forwarded to the release workflow for actions/upload-artifact.
+  actions: write
+
+# Shared with release.yml: one release at a time across both entry points, and
+# a run is never cancelled mid-flight (a queued tick waits its turn).
+concurrency:
+  group: dsh-release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Compare the pin with the registry
+    # `workflow_dispatch` cannot be restricted to a branch (`branches:` is not a
+    # workflow_dispatch key), and both jobs reason about main, so guard here.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.check.outputs.target }}
+      bump: ${{ steps.check.outputs.bump }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Compare pin, registry, and Releases
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DSH_TRACK_VERSION: ${{ inputs.version }}
+        run: node scripts/track-dsh.mjs check
+
+  release:
+    name: Release
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    uses: ./.github/workflows/release-macos.yml
+    with:
+      # Pin a version only when the pin actually moves; a repair run builds the
+      # version already on main. `bump` was decided against the same pin this
+      # run will see, so the value is exact.
+      harness_version: ${{ needs.check.outputs.bump == 'true' && needs.check.outputs.target || '' }}
+      publish: true
+      # The repair path must be able to complete an incomplete Release, so the
+      # "already fully released" guard stays off here; `skip_if_released` below
+      # is what keeps a duplicate run from rebuilding a finished version.
+      require_new_release: false
+      skip_if_released: true
+    secrets: inherit
