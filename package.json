@@ -1,6 +1,6 @@
 {
   "name": "dsh-client",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Native macOS wrapper for the DeepSeek Harness (dsh) web GUI, supervising a loopback `dsh web` host",
   "author": "fatwang2",
