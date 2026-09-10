@@ -39,7 +39,25 @@ const EXPRESSION = `(() => {
   const logoRect = logoRow?.getBoundingClientRect()
   const interactiveControl = document.querySelector('button, a, input, textarea, select, [role="button"], [contenteditable]')
   const interactiveControlStyle = interactiveControl === null ? undefined : getComputedStyle(interactiveControl)
+  // The session header only exists while a conversation is open; in the hero
+  // phase the frontend renders it empty and display:none.
+  const header = document.querySelector('[data-slot="conversation.session.header"] > header')
+  const titleRow = header?.querySelector('[class*="titleRow"]')
+  const titleRect = titleRow?.getBoundingClientRect()
+  const toggle = sidebar.querySelector('[class*="toggle"]')
+  const toggleRect = toggle?.getBoundingClientRect()
+  // The details panel keeps its subtree mounted at width 0 while closed, so
+  // its header is measurable whether or not the panel is open.
+  const detailsHeader = document.querySelector('[data-slot="details"] > * > [class*="_header"]')
+  const detailsClose = detailsHeader?.querySelector('button')
+  const detailsRect = detailsClose?.getBoundingClientRect()
+  const centerOf = rect => rect === undefined ? undefined : Math.round(rect.top + rect.height / 2)
   return {
+    detailsHeaderCenter: centerOf(detailsRect),
+    headerPaddingTop: header === null || header === undefined ? undefined : getComputedStyle(header).paddingTop,
+    titleRowTop: titleRect === undefined ? undefined : Math.round(titleRect.top),
+    titleRowCenter: centerOf(titleRect),
+    sidebarToggleCenter: centerOf(toggleRect),
     title: document.title,
     paddingTop: cs.paddingTop,
     sidebarWidth: Math.round(rect.width),
@@ -102,5 +120,36 @@ if (result.logoRowTop === undefined) {
 if (result.logoRowTop < trafficLightBottom) {
   console.error(`VERIFY FAILED: logo row top ${result.logoRowTop} overlaps traffic lights (bottom ${trafficLightBottom})`)
   process.exit(1)
+}
+/**
+ * Session-header alignment. The header is absent until a conversation is
+ * open, so this is a conditional assertion rather than a required one: run
+ * the verifier with a session open to exercise it.
+ */
+if (result.titleRowCenter === undefined) {
+  console.error('NOTE: no session header on screen; open a conversation to verify title alignment')
+} else {
+  if (result.titleRowTop < 40) {
+    console.error(`VERIFY FAILED: title row top ${result.titleRowTop} sits under the 40px drag region`)
+    process.exit(1)
+  }
+  if (result.sidebarToggleCenter === undefined) {
+    console.error('VERIFY FAILED: sidebar collapse toggle not found for the alignment reference')
+    process.exit(1)
+  }
+  if (Math.abs(result.titleRowCenter - result.sidebarToggleCenter) > 1) {
+    console.error(`VERIFY FAILED: title row centers on y=${result.titleRowCenter}, sidebar controls on y=${result.sidebarToggleCenter}`)
+    process.exit(1)
+  }
+  console.log(`VERIFY PASSED: title row and sidebar controls both center on y=${result.titleRowCenter}`)
+}
+/** Details panel header, measurable even while the panel is closed. */
+if (result.detailsHeaderCenter === undefined) {
+  console.error('NOTE: details panel header not mounted; open a conversation to verify its alignment')
+} else if (result.sidebarToggleCenter !== undefined && Math.abs(result.detailsHeaderCenter - result.sidebarToggleCenter) > 1) {
+  console.error(`VERIFY FAILED: details header centers on y=${result.detailsHeaderCenter}, sidebar controls on y=${result.sidebarToggleCenter}`)
+  process.exit(1)
+} else {
+  console.log(`VERIFY PASSED: details header centers on y=${result.detailsHeaderCenter}`)
 }
 console.log(`VERIFY PASSED: ${result.dragRegionWidth}x${result.dragRegionHeight} draggable inset, logo row starts at y=${result.logoRowTop} (traffic lights end at y=${trafficLightBottom})`)

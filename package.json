@@ -1,6 +1,6 @@
 {
   "name": "dsh-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Native macOS wrapper for the DeepSeek Harness (dsh) web GUI, supervising a loopback `dsh web` host",
   "author": "fatwang2",
@@ -21,8 +21,8 @@
     "test": "vitest run",
     "stage": "node scripts/stage-runtime.mjs",
     "dev": "npm run build && electron .",
-    "package": "npm run build && npm run stage && electron-builder --dir --config.mac.identity=null",
-    "dist": "npm run build && npm run stage && electron-builder --mac dmg zip --config.mac.identity=null",
+    "package": "npm run build && npm run stage && electron-builder --dir --config.mac.identity=null --publish never",
+    "dist": "npm run build && npm run stage && electron-builder --mac dmg zip --config.mac.identity=null --publish never",
     "dist:signed": "bash scripts/release-mac.sh"
   },
   "devDependencies": {

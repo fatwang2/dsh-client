@@ -1,5 +1,6 @@
 node_modules/
-runtime-host/
+runtime-host/*
+!runtime-host/package-lock.json
 dist/
 lib/
 build/*

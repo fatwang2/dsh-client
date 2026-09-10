@@ -3,7 +3,8 @@
  *
  * The host is spawned on an OS-assigned loopback port (`--port 0`) and
  * announces its readiness on stdout with the canonical line
- * `dsh web: http://127.0.0.1:<port>`. The supervisor owns the whole child
+ * `dsh web: http://127.0.0.1:<port>/?token=<secret>` (the token arrived with
+ * 0.1.5-alpha; earlier releases printed the bare origin). The supervisor owns the whole child
  * lifecycle: startup (with a bounded readiness timeout), graceful shutdown
  * (SIGTERM, then SIGKILL after a bounded grace period matching the harness'
  * 5s drain), and unexpected-exit reporting.
@@ -22,12 +23,12 @@ export interface ReadinessParser {
   /**
    * Consume one stdout chunk.
    * @param chunk - Text emitted by the Host.
-   * @returns The loopback origin once a complete readiness line is observed.
+   * @returns The loopback URL (origin, plus the access token when the Host issues one) once a complete readiness line is observed.
    */
   push(chunk: string): string | undefined
   /**
    * Finish the stream and require a readiness line.
-   * @returns The parsed loopback origin.
+   * @returns The parsed loopback URL.
    */
   finalize(): string
 }
@@ -37,7 +38,10 @@ export interface ReadinessParser {
  *
  * The webview will be pointed at whatever this returns, so the accepted
  * shape is deliberately strict: loopback HTTP only, root path, explicit
- * numeric port, no query or hash.
+ * numeric port, no hash, and at most one query parameter — the Host's
+ * per-process access `token`, which the renderer must carry on its first
+ * navigation or the API fence rejects it. Anything else in the query is
+ * refused rather than forwarded.
  */
 function parseReadinessLine(line: string): string | undefined {
   if (!line.startsWith(READINESS_PREFIX)) return undefined
@@ -51,17 +55,21 @@ function parseReadinessLine(line: string): string | undefined {
     throw new Error(`host readiness URL is invalid: ${token}`)
   }
   const port = Number(url.port)
+  const params = [...url.searchParams.keys()]
+  const accessToken = url.searchParams.get('token')
+  const queryAccepted = params.length === 0
+    || (params.length === 1 && params[0] === 'token' && accessToken !== null && accessToken !== '')
   if (url.protocol !== 'http:'
     || (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost')
     || url.pathname !== '/'
-    || url.search !== ''
+    || !queryAccepted
     || url.hash !== ''
     || !Number.isInteger(port)
     || port < 1
     || port > 65_535) {
     throw new Error(`host readiness URL must be loopback HTTP with an explicit port: ${token}`)
   }
-  return url.origin
+  return accessToken === null ? url.origin : `${url.origin}/?token=${encodeURIComponent(accessToken)}`
 }
 
 /**
@@ -299,7 +307,7 @@ export function spawnDshWeb(options: SpawnDshWebOptions): HostChild {
   const env = options.electronRunAsNode
     ? { ...options.env, ELECTRON_RUN_AS_NODE: '1' }
     : options.env
-  const child = spawn(options.nodeExecutable, ['--expose-internals', options.cliEntry, 'web', '--host', '127.0.0.1', '--port', '0'], {
+  const child = spawn(options.nodeExecutable, ['--expose-internals', options.cliEntry, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'], {
     cwd: options.cwd,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],

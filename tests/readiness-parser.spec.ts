@@ -25,15 +25,37 @@ describe('createReadinessParser', () => {
     expect(parser.push('dsh web: http://localhost:59273\n')).toBe('http://localhost:59273')
   })
 
+  it('keeps the access token the Host issues with the URL', () => {
+    const parser = createReadinessParser()
+    expect(parser.push('dsh web: http://127.0.0.1:64502/?token=6Ug_nsdCMTHxTSiQ-oqs3V470gb6Fz81g3pkjQWMZ-8\n'))
+      .toBe('http://127.0.0.1:64502/?token=6Ug_nsdCMTHxTSiQ-oqs3V470gb6Fz81g3pkjQWMZ-8')
+  })
+
+  it('ignores the LAN hint printed after the loopback URL', () => {
+    const parser = createReadinessParser()
+    expect(parser.push('dsh web: http://127.0.0.1:64502/?token=abc (LAN: http://192.168.1.10:64502/?token=abc)\n'))
+      .toBe('http://127.0.0.1:64502/?token=abc')
+  })
+
+  it('rejects an empty token or any other query parameter', () => {
+    for (const url of [
+      'dsh web: http://127.0.0.1:3080/?token=\n',
+      'dsh web: http://127.0.0.1:3080/?token=abc&x=1\n',
+      'dsh web: http://127.0.0.1:3080/?x=1\n',
+    ]) {
+      const parser = createReadinessParser()
+      expect(() => parser.push(url)).toThrow(/loopback HTTP with an explicit port/)
+    }
+  })
+
   it('rejects a non-loopback hostname', () => {
     const parser = createReadinessParser()
     expect(() => parser.push('dsh web: http://192.168.1.10:3080\n')).toThrow(/loopback/)
   })
 
-  it('rejects a non-root path, query, or hash', () => {
+  it('rejects a non-root path or hash', () => {
     for (const url of [
       'dsh web: http://127.0.0.1:3080/session\n',
-      'dsh web: http://127.0.0.1:3080/?x=1\n',
       'dsh web: http://127.0.0.1:3080/#a\n',
     ]) {
       const parser = createReadinessParser()

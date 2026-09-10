@@ -24,8 +24,7 @@ const APP_NAME = 'DeepSeek Harness'
 const LEGACY_USER_DATA_DIRECTORY = 'dsh-mac'
 const WINDOW_WIDTH = 1440
 const WINDOW_HEIGHT = 920
-const DESKTOP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const REPOSITORY_ROOT = resolve(DESKTOP_DIR, '..')
+const CHECKOUT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 // The npm project is now dsh-client, but existing installs already store
 // sessions and settings under dsh-mac. Keep that location stable across the
@@ -35,7 +34,8 @@ app.setPath('userData', join(app.getPath('appData'), LEGACY_USER_DATA_DIRECTORY)
 let mainWindow: BrowserWindow | undefined
 let host: HostSupervisor | undefined
 let lifecycle: DesktopLifecycle | undefined
-let hostOrigin: string | undefined
+/** Loopback URL announced by the Host: origin plus its access token, when it issues one. */
+let hostUrl: string | undefined
 let bootQuitPromise: Promise<void> | undefined
 let quitReleased = false
 let installUpdateOnQuit = false
@@ -46,7 +46,7 @@ function hostPaths(): { nodeExecutable: string, cliEntry: string, cwd: string, e
   if (!app.isPackaged) {
     return {
       nodeExecutable: process.env.DSH_MAC_NODE_EXECUTABLE ?? 'node',
-      cliEntry: join(REPOSITORY_ROOT, 'runtime-host/node_modules/@deepseek-ai/dsh/lib/bin.js'),
+      cliEntry: join(CHECKOUT_ROOT, 'runtime-host/node_modules/@deepseek-ai/dsh/lib/bin.js'),
       cwd: process.cwd(),
       electronRunAsNode: false,
     }
@@ -135,11 +135,44 @@ select,
 [contenteditable]:not([contenteditable="false"]) {
   -webkit-app-region: no-drag;
 }
+
+/*
+ * Align the session header with the sidebar across the inset strip. The
+ * header is the frontend's own title/tabs/actions strip at the top of the
+ * center column; with only the sidebar inset it starts at y=12, which lands
+ * its title row inside the traffic-light band and reads a control-height
+ * higher than the logo and the collapse button beside it. The sidebar brand
+ * and toggle both center on y=76 (40px inset, 6px row margin, 8px row
+ * padding, half of the 24/28px control), and the title row is a flex row with
+ * a 32px minimum, so 76 - 16 puts its center on the same line. The strip also
+ * stops the title row from sitting under the 40px drag region, which had been
+ * swallowing its pointer events.
+ *
+ * The data-slot attribute is the frontend's declared seam for this strip and
+ * is stable; the css-module hash on the same element is not, so the selector
+ * hangs off the attribute and the element type rather than the class.
+ */
+[data-slot="conversation.session.header"] > header {
+  padding-top: 60px !important;
+}
+
+/*
+ * Same treatment for the third column. The details panel is the frame's own
+ * grid item, so its header starts at y=0 like the other two and its title and
+ * close button center on y=28 without an inset. Its header row is driven by
+ * the 28px close button, so 76 - 14 of top padding lands it on the shared
+ * line. The panel keeps its subtree mounted at width 0 while closed, so this
+ * rule applies whether or not the panel is open.
+ */
+[data-slot="details"] > * > [class*="_header"] {
+  padding-top: 62px !important;
+}
 `
 
 async function createMainWindow(): Promise<BrowserWindow> {
-  const origin = hostOrigin
-  if (origin === undefined) throw new Error('host is not ready')
+  const url = hostUrl
+  if (url === undefined) throw new Error('host is not ready')
+  const origin = new URL(url).origin
   const window = new BrowserWindow({
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
@@ -192,7 +225,9 @@ async function createMainWindow(): Promise<BrowserWindow> {
     if (isExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  const rendererUrl = new URL(origin)
+  // Keep the Host's access token on the first navigation; the API fence
+  // binds the session to it and rejects an untokened loopback request.
+  const rendererUrl = new URL(url)
   rendererUrl.searchParams.set('dsh-mac-platform', process.platform)
   if (process.platform === 'darwin') {
     // Queue the inset for the first document without awaiting: awaiting
@@ -318,7 +353,7 @@ function initializeUpdates(): void {
         type: 'info',
         title: `${APP_NAME} 更新已就绪`,
         message: `${APP_NAME} ${version} 已下载完成。`,
-        detail: `立即重启以安装更新，或稍后在退出 ${APP_NAME} 时安装。`,
+        detail: `更新已下载完成。立即重启以安装，或之后从菜单选择「重启并安装 …」（菜单项会保留到安装完成）。`,
         buttons: ['重启并安装', '稍后'],
         defaultId: 0,
         cancelId: 1,
@@ -378,7 +413,7 @@ async function boot(): Promise<void> {
       void requestAppQuit()
     },
   })
-  hostOrigin = await host.start()
+  hostUrl = await host.start()
   hardenSession()
   lifecycle = createDesktopLifecycle({
     getWindow: () => mainWindow,
