@@ -4,6 +4,6 @@
   "private": true,
   "description": "Manifest for the closed production dependency tree of the dsh CLI staged into the packaged app. Pinned exactly: the harness is a fast-moving release candidate with no compatibility promise.",
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.7-alpha.1"
+    "@deepseek-ai/dsh": "0.1.7-alpha.2"
   }
 }
