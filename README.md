@@ -1,5 +1,10 @@
 # DSH Client
 
+> [!IMPORTANT]
+> **This project is archived and no longer maintained.** DeepSeek now ships an official DeepSeek Harness desktop app for macOS (Apple silicon) and Windows. Download it from [deepseek.com/harness](https://www.deepseek.com/harness/).
+>
+> Installs of this client will not receive further updates. To switch, quit this app, then install the official build; it uses the same `DeepSeek Harness.app` name and will replace this one in `/Applications`. Replacing the app does not delete your `~/.dsh` directory (credentials, settings, sessions).
+
 DSH Client is a native client for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) web GUI. The packaged application is named **DeepSeek Harness**. Its shell supervises a loopback `dsh web` host process, owns application lifetime, and stages the exact pinned harness runtime into the packaged app — no separate Node.js install or terminal window required.
 
 This is an independent community project and is not affiliated with or endorsed by DeepSeek.
